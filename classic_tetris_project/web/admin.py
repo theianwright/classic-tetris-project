@@ -81,7 +81,7 @@ class GameInline(admin.TabularInline):
 @admin.register(Match)
 class MatchAdmin(admin.ModelAdmin):
     inlines = [GameInline]
-    list_display = ('__str__', 'player1', 'wins1', 'player2', 'wins2', 'channel', 'ended_at')
+    list_display = ('__str__', 'player1', 'wins1', 'player2', 'wins2', 'channel', 'ended_at', "reported_by")
     autocomplete_fields = ("player1", "player2", "channel")
     readonly_fields = ("reported_by",)
 
@@ -149,7 +149,7 @@ class EventAdmin(DjangoObjectActions, MarkdownxModelAdmin):
 
 @admin.register(Qualifier)
 class QualifierAdmin(admin.ModelAdmin):
-    list_display = ("user", "event", "display_score", "status_tag", "reviewed_at")
+    list_display = ("user", "event", "display_score", "status_tag", "reviewed_at", "reviewed_by")
     list_filter = ("approved",)
 
     fieldsets = (

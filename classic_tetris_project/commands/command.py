@@ -1,15 +1,17 @@
-import django.db
-import logging
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
+from inspect import signature
 import re
 import rollbar
 import traceback
-from abc import ABC
+from typing import Type
+
 from discord import ChannelType
 from django.conf import settings
-from inspect import signature
 
 from .. import discord, twitch
-from ..util import Platform
+from ..util import Platform, DocSection
 from ..models.users import DiscordUser, TwitchUser
 
 RE_DISCORD_MENTION = re.compile(r"^<@!?(\d+)>$")
@@ -22,6 +24,12 @@ class CommandException(Exception):
         self.send_usage = send_usage
 
 class Command(ABC):
+    aliases: tuple[str, ...] # the first entry is considered the default
+    supported_platforms: tuple[Platform, ...]
+    usage: str
+    notes: tuple[str, ...] = () # for things like "moderator-only"
+    section: DocSection
+
     def __init__(self, context):
         self.context = context
         self.args = context.args
@@ -70,25 +78,25 @@ class Command(ABC):
             channel = self.context.channel
             if not (author.is_moderator or
                     (channel.type == "channel" and self.context.author.username == channel.name)):
-                raise CommandException()
+                raise CommandException("Only moderators can use this.")
 
         elif self.context.platform == Platform.DISCORD:
             guild = discord.get_guild()
+            assert guild is not None
             member = self.context.author
             role = guild.get_role(discord.MODERATOR_ROLE_ID)
 
             if role not in member.roles:
-                raise CommandException()
+                raise CommandException("Only moderators can use this.")
 
     def check_private(self, sensitive=False):
         if self.context.platform == Platform.DISCORD:
             if self.context.channel.type != ChannelType.private:
-
-                warning = ""
                 if sensitive:
                     self.context.delete_message(self.context.message)
                     self.context.platform_user.send_message(
-                        "Your message in a public channel was deleted. Try here instead."
+                        "Your message in a public channel was deleted. "
+                        "Try here instead."
                     )
 
                 raise CommandException(
@@ -98,7 +106,8 @@ class Command(ABC):
         elif self.context.platform == Platform.TWITCH:
             if self.context.channel.type != "whisper":
                 raise CommandException(
-                    "This command only works in a direct message. Try whispering me."
+                    "This command only works in a direct message. "
+                    "Try whispering me."
                 )
 
     def check_public(self):
@@ -113,10 +122,6 @@ class Command(ABC):
                 raise CommandException(
                     "This command only works in a public channel."
                 )
-
-    @property
-    def usage(self):
-        return self._usage_string
 
     @property
     def arity(self):
@@ -163,6 +168,7 @@ class Command(ABC):
                 return None
 
         guild = guild or discord.get_guild()
+        assert guild is not None
         member = None
         # Mention has format "User#1234"
         # Find by username and discriminator
@@ -219,34 +225,40 @@ class Command(ABC):
                 return None
 
     @staticmethod
-    def register(*aliases, usage, platforms=(Platform.DISCORD, Platform.TWITCH)):
-        def _register_command(command):
-            command.supported_platforms = platforms
-            command._usage_string = usage
-            for alias in aliases:
+    def register():
+        def _register_command(command: Type[Command]):
+            Command.check_attributes(command)
+            COMMAND_CLASSES.add(command)
+            for alias in command.aliases:
+                if alias in COMMAND_MAP:
+                    raise ValueError(f"{alias} used for multiple commands!")
                 COMMAND_MAP[alias] = command
             return command
         return _register_command
 
     @staticmethod
-    def register_twitch(*args, **kwargs):
-        return Command.register(*args, **kwargs, platforms=(Platform.TWITCH,))
+    def check_attributes(command: Type[Command]):
+        assert command.execute
+        assert hasattr(command, "aliases")
+        assert hasattr(command, "supported_platforms")
+        assert hasattr(command, "usage")
+        assert hasattr(command, "section")
+        assert isinstance(command.section, DocSection)
+        assert command.__doc__
 
-    @staticmethod
-    def register_discord(*args, **kwargs):
-        return Command.register(*args, **kwargs, platforms=(Platform.DISCORD,))
-
-    def execute(self):
+    @abstractmethod
+    def execute(self, *args, **kwargs):
         pass
 
 class CustomTwitchCommand(Command):
     def __init__(self, context, command_object):
         super().__init__(context)
-        self.supported_platforms = [Platform.TWITCH]
+        self.supported_platforms = (Platform.TWITCH,)
 
         self.output = command_object.output or command_object.alias_for.output
 
-    def execute(self, *args):
+    def execute(self):
         self.send_message(self.output)
 
-COMMAND_MAP = {}
+COMMAND_MAP: dict[str, Type[Command]] = {}
+COMMAND_CLASSES: set[Type[Command]] = set()

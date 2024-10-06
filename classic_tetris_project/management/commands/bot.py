@@ -1,10 +1,11 @@
-import time
 from asgiref.sync import sync_to_async
 import asyncio
-from django.core.management.base import BaseCommand, CommandError
+import time
 from threading import Thread
 import logging.config
 import yaml
+
+from django.core.management.base import BaseCommand, CommandError
 
 from ... import discord, twitch
 from ...commands.command_context import DiscordCommandContext, TwitchCommandContext, ReportCommandContext, ScheduleCommandContext
@@ -85,6 +86,11 @@ class Command(BaseCommand):
             chan = guild.get_channel(discord.MAINTENANCE_CHAN_ID)
             # not using async_to_sync because this function needs to be run in
             # the discord event loop
+            # more context: according to the article linked above, the
+            # sync_to_async method enters the existing event loop if possible,
+            # which is why discord api calls work properly inside (because we
+            # start in async-land, then go to sync with dispatch, then back).
+            # since we start in sync-land here, there's nowhere to go back.
             # source: https://stackoverflow.com/questions/52232177/runtimeerror-timeout-context-manager-should-be-used-inside-a-task
             asyncio.run_coroutine_threadsafe(chan.send("Twitch bot was disconnected, attempting to reconnect..."), discord.client.loop)
 
